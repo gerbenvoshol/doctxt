@@ -195,6 +195,9 @@ writetofile(char *out_file_path, char *data)
 
 char *xml_unescape(const char *in) {
     char *out = malloc(strlen(in) * 2); // generous size
+    if (!out) {
+        return NULL;
+    }
     char *dst = out;
     const char *src = in;
 

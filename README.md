@@ -24,7 +24,19 @@ $ make install
 ### Usage
 
 ```sh
-$ doctxt [FILE] [-o OUTFILE]
+$ doctxt [FILE] [-o OUTFILE] [-c]
 ```
 
+Options:
+- `-o OUTFILE`: Specify the output file (default: out.txt)
+- `-c`: Extract only comments from the document
+- `-v`: Display version information
+
 If -o is omitted output will be written to out.txt
+
+### Features
+
+- Extract text content from docx files
+- Extract tables (preserves table structure with tab-separated columns)
+- Extract comments with author attribution
+- Fast and lightweight C implementation

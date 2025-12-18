@@ -195,6 +195,9 @@ writetofile(char *out_file_path, char *data)
 
 char *xml_unescape(const char *in) {
     char *out = malloc(strlen(in) * 2); // generous size
+    if (!out) {
+        return NULL;
+    }
     char *dst = out;
     const char *src = in;
 
@@ -222,7 +225,7 @@ char *xml_unescape(const char *in) {
     return out;
 }
 
-void
+int
 readzip(const char *path, char *filename)
 {
 	// Open the zip file using miniz
@@ -235,13 +238,15 @@ readzip(const char *path, char *filename)
 	// Find the file inside the zip archive
 	int file_index = mz_zip_reader_locate_file(&zip, filename, NULL, 0);
 	if (file_index < 0) {
-		die("File not found in zip: %s", filename);
+		mz_zip_reader_end(&zip);
+		return 0; // File not found
 	}
 
 	// Extract the file to memory
 	size_t file_size;
 	void *file_data = mz_zip_reader_extract_to_heap(&zip, file_index, &file_size, 0);
 	if (!file_data) {
+		mz_zip_reader_end(&zip);
 		die("Failed to extract file from zip");
 	}
 
@@ -251,6 +256,53 @@ readzip(const char *path, char *filename)
 	// Clean up
 	mz_free(file_data);
 	mz_zip_reader_end(&zip);
+	return 1; // Success
+}
+
+void extract_text_nodes(struct txml_node *parent, FILE *outfile)
+{
+    struct txml_node *node_t = NULL;
+    while ((node_t = txml_find(parent, node_t, TXML_ELEMENT, "w:t", NULL, 1))) {
+        char *text = node_t->value ? xml_unescape(node_t->value) : NULL;
+        if (text) {
+            fprintf(outfile, "%s", text);
+            free(text);
+        }
+    }
+}
+
+void extract_table(struct txml_node *table, FILE *outfile)
+{
+    struct txml_node *row = NULL;
+    
+    // Traverse all table rows (w:tr)
+    while ((row = txml_find(table, row, TXML_ELEMENT, "w:tr", NULL, 0))) {
+        struct txml_node *cell = NULL;
+        int first_cell = 1;
+        
+        // Traverse all table cells (w:tc) in the row
+        while ((cell = txml_find(row, cell, TXML_ELEMENT, "w:tc", NULL, 0))) {
+            if (!first_cell) {
+                fprintf(outfile, "\t");
+            }
+            first_cell = 0;
+            
+            // Extract all paragraphs in the cell
+            struct txml_node *para = NULL;
+            int first_para = 1;
+            int has_content = 0;
+            while ((para = txml_find(cell, para, TXML_ELEMENT, "w:p", NULL, 0))) {
+                if (!first_para) {
+                    fprintf(outfile, " ");
+                }
+                first_para = 0;
+                extract_text_nodes(para, outfile);
+                has_content = 1;
+            }
+            // Empty cells are represented by nothing between tabs (handled by separator logic)
+        }
+        fprintf(outfile, "\n");
+    }
 }
 
 void parsexml(char *path, FILE *outfile)
@@ -270,17 +322,65 @@ void parsexml(char *path, FILE *outfile)
         die("No body element found in XML");
     }
 
-    struct txml_node *node_p = NULL, *node_r, *node_t = NULL;
+    // Process paragraphs and tables
+    // Note: Due to txml API limitations, we extract paragraphs first, then tables.
+    // This may not preserve the exact document order if tables and paragraphs are interleaved.
+    // For most documents this is acceptable as tables are typically grouped.
+    struct txml_node *node_p = NULL, *node_tbl = NULL;
     
-    // Traverse all <w:p> nodes
+    // First, extract all paragraphs
     while ((node_p = txml_find(node_body, node_p, TXML_ELEMENT, "w:p", NULL, 0))) {
-    	while ((node_t = txml_find(node_p, node_t, TXML_ELEMENT, "w:t", NULL, 1))) {
-        	char *text = node_t->value ? xml_unescape(node_t->value) : NULL;
-			if (text) {
-			    fprintf(outfile, "%s", text);
-			    free(text);
-			}
-    	}
+        extract_text_nodes(node_p, outfile);
+        fprintf(outfile, "\n");
+    }
+    
+    // Then extract all tables
+    while ((node_tbl = txml_find(node_body, node_tbl, TXML_ELEMENT, "w:tbl", NULL, 0))) {
+        extract_table(node_tbl, outfile);
+    }
+
+    // Clean up the allocated memory for nodes and XML data
+    free(nodes);
+    free(xml_data);
+}
+
+void parsecomments(char *path, FILE *outfile)
+{
+    struct txml_node *nodes = NULL;
+
+    // Parse the XML data
+    char *xml_data = txml_parse_file(path, &nodes);
+    if (!xml_data) {
+        // No comments file exists - silently return
+        return;
+    }
+
+    // Find the comments root element
+    struct txml_node *comments_root = NULL;
+    comments_root = txml_find(nodes, NULL, TXML_ELEMENT, "w:comments", NULL, 0);
+    if (!comments_root) {
+        // No comments element found
+        free(nodes);
+        free(xml_data);
+        return;
+    }
+
+    // Find all comment nodes within the comments element
+    struct txml_node *comment = NULL;
+    while ((comment = txml_find(comments_root, comment, TXML_ELEMENT, "w:comment", NULL, 0))) {
+        // Get comment author
+        struct txml_node *author_attr = txml_find(comment, NULL, TXML_ATTRIBUTE, "w:author", NULL, 0);
+        if (author_attr && author_attr->value) {
+            fprintf(outfile, "[%s]: ", author_attr->value);
+        } else {
+            fprintf(outfile, "[Unknown]: ");
+        }
+        
+        // Extract text from all paragraphs in the comment
+        struct txml_node *para = NULL;
+        while ((para = txml_find(comment, para, TXML_ELEMENT, "w:p", NULL, 0))) {
+            extract_text_nodes(para, outfile);
+        }
         fprintf(outfile, "\n");
     }
 
@@ -292,7 +392,7 @@ void parsexml(char *path, FILE *outfile)
 void
 usage()
 {
-	die("usage: doctxt infile [-o outfile]");
+	die("usage: doctxt infile [-o outfile] [-c]");
 }
 
 int
@@ -300,44 +400,74 @@ main(int argc, char *argv[])
 {
 	FILE *outfile = NULL;
 	char *outfilename = "out.txt";
-	char *infilename = "";
+	char *infilename = NULL;
+	int comments_only = 0;
 
 	if (argc < 2) {
 		usage();
 	}
-	infilename = argv[1];
-	for (int i = 2; i < argc; i++) {
+
+	// Parse all arguments
+	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-v")) {
 			puts("doctxt-"VERSION);
 			return 0;
+		} else if (!strcmp(argv[i], "-c")) {
+			comments_only = 1;
 		} else if (!strcmp(argv[i], "-o")) {
-			if (argc <= i - 1) {
+			if (i + 1 >= argc) {
 				usage();
 			}
 			outfilename = argv[i + 1];
 			i++;
-		}
-		else {
+		} else if (argv[i][0] == '-') {
+			// Unknown flag
 			usage();
+		} else {
+			// Input filename
+			if (infilename != NULL) {
+				usage(); // Multiple input files not allowed
+			}
+			infilename = argv[i];
 		}
 	}
 
-	// Read the zip file and extract the "word/document.xml"
-	readzip(infilename, "word/document.xml");
+	// Check if input filename was provided
+	if (infilename == NULL) {
+		usage();
+	}
 
 	// Open output file for writing
 	outfile = fopen(outfilename, "wt");
+	if (!outfile) {
+		die("Unable to open output file: %s", outfilename);
+	}
 
-	// Parse the extracted XML and write the content to the output file
-	parsexml(TEMPFILE, outfile);
+	if (comments_only) {
+		// Extract only comments
+		if (readzip(infilename, "word/comments.xml")) {
+			parsecomments(TEMPFILE, outfile);
+			// Remove the temporary file
+			if (remove(TEMPFILE) != 0) {
+				die("Unable to delete tempfile");
+			}
+		}
+		// If no comments file, output file will be empty
+	} else {
+		// Extract document content (text and tables)
+		if (!readzip(infilename, "word/document.xml")) {
+			fclose(outfile);
+			die("File not found in zip: word/document.xml");
+		}
+		parsexml(TEMPFILE, outfile);
+		// Remove the temporary file
+		if (remove(TEMPFILE) != 0) {
+			die("Unable to delete tempfile");
+		}
+	}
 
 	// Close the output file
 	fclose(outfile);
-
-	// Remove the temporary file
-	if (remove(TEMPFILE) != 0) {
-		die("Unable to delete tempfile");
-	}
 
 	return 0;
 }

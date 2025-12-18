@@ -6,7 +6,7 @@ MANPREFIX = ${PREFIX}/share/man
 
 # includes and libs
 INCS = -I. -I/usr/include -I/usr/include/libxml2
-LIBS = -L/usr/lib -lzip -lxml2
+LIBS = -L/usr/lib -lxml2
 
 # flags
 CPPFLAGS = -DVERSION=\"${VERSION}\" -D_XOPEN_SOURCE=600

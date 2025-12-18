@@ -1,6 +1,6 @@
 include config.mk
 
-SRC = doctxt.c util.c
+SRC = doctxt.c util.c miniz.c
 OBJ = ${SRC:.c=.o}
 
 all: options doctxt

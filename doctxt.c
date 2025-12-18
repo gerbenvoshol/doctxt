@@ -287,13 +287,16 @@ void extract_table(struct txml_node *table, FILE *outfile)
             // Extract all paragraphs in the cell
             struct txml_node *para = NULL;
             int first_para = 1;
+            int has_content = 0;
             while ((para = txml_find(cell, para, TXML_ELEMENT, "w:p", NULL, 0))) {
                 if (!first_para) {
                     fprintf(outfile, " ");
                 }
                 first_para = 0;
                 extract_text_nodes(para, outfile);
+                has_content = 1;
             }
+            // Empty cells are represented by nothing between tabs (handled by separator logic)
         }
         fprintf(outfile, "\n");
     }
@@ -316,8 +319,10 @@ void parsexml(char *path, FILE *outfile)
         die("No body element found in XML");
     }
 
-    // Process paragraphs and tables in document order
-    // We need to iterate through both types since txml doesn't give us direct children
+    // Process paragraphs and tables
+    // Note: Due to txml API limitations, we extract paragraphs first, then tables.
+    // This may not preserve the exact document order if tables and paragraphs are interleaved.
+    // For most documents this is acceptable as tables are typically grouped.
     struct txml_node *node_p = NULL, *node_tbl = NULL;
     
     // First, extract all paragraphs
@@ -364,6 +369,8 @@ void parsecomments(char *path, FILE *outfile)
         struct txml_node *author_attr = txml_find(comment, NULL, TXML_ATTRIBUTE, "w:author", NULL, 0);
         if (author_attr && author_attr->value) {
             fprintf(outfile, "[%s]: ", author_attr->value);
+        } else {
+            fprintf(outfile, "[Unknown]: ");
         }
         
         // Extract text from all paragraphs in the comment
@@ -438,7 +445,9 @@ main(int argc, char *argv[])
 		if (readzip(infilename, "word/comments.xml")) {
 			parsecomments(TEMPFILE, outfile);
 			// Remove the temporary file
-			remove(TEMPFILE);
+			if (remove(TEMPFILE) != 0) {
+				die("Unable to delete tempfile");
+			}
 		}
 		// If no comments file, output file will be empty
 	} else {

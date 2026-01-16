@@ -249,7 +249,8 @@ static const char *find_image_target(md_context *ctx, const char *rel_id) {
 /* Extract image from ZIP to output directory */
 static char *extract_image(md_context *ctx, const char *target) {
     /* Build the full path in the ZIP archive - validate length */
-    if (strlen(target) > 500) {
+    /* Buffer is 512 bytes, need room for "word/" (5 chars) + target + null terminator */
+    if (strlen(target) > 506) {
         /* Target path too long */
         return NULL;
     }
@@ -278,17 +279,20 @@ static char *extract_image(md_context *ctx, const char *target) {
         filename++; /* Skip the '/' */
     }
     
+    /* Build output path */
+    char output_path[1024];
+    
     /* Validate combined path length */
+    /* output_path buffer is 1024 bytes, need room for dir + "/" + filename + null */
     size_t output_dir_len = ctx->output_dir ? strlen(ctx->output_dir) : 0;
     size_t filename_len = strlen(filename);
-    if (output_dir_len + filename_len + 2 > 1020) {
+    if (output_dir_len + filename_len + 2 > sizeof(output_path) - 1) {
         /* Combined path too long */
         mz_free(file_data);
         return NULL;
     }
     
-    /* Build output path */
-    char output_path[1024];
+    /* Build the actual output path */
     if (ctx->output_dir && ctx->output_dir[0] != '\0') {
         snprintf(output_path, sizeof(output_path), "%s/%s", ctx->output_dir, filename);
     } else {

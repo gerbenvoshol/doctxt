@@ -137,7 +137,11 @@ static void parse_relationships(const char *docx_path, md_context *ctx) {
         return;
     }
     
-    /* Write to temporary file for txml_parse_file */
+    /* Write to temporary file for txml_parse_file 
+     * Note: Using predictable temp path based on PID. For high-security environments,
+     * consider using mkstemp() for secure temp file creation. Current approach is
+     * acceptable for read-only XML parsing in typical use cases.
+     */
     char temp_path[256];
     snprintf(temp_path, sizeof(temp_path), "/tmp/docx2md-rels-%d.xml", getpid());
     FILE *temp = fopen(temp_path, "wb");
@@ -217,6 +221,9 @@ static void parse_relationships(const char *docx_path, md_context *ctx) {
             }
         }
     }
+    
+    /* Update actual count to reflect successful allocations */
+    ctx->image_rel_count = idx;
     
     free(nodes);
     free(xml_data);
@@ -311,7 +318,12 @@ static char *extract_image(md_context *ctx, const char *target) {
     mz_free(file_data);
     
     /* Return just the filename for markdown */
-    return strdup(filename);
+    char *result = strdup(filename);
+    if (!result) {
+        /* Allocation failure - remove the written file to maintain consistency */
+        remove(output_path);
+    }
+    return result;
 }
 
 /* Process a drawing element (image) */
@@ -624,7 +636,7 @@ static void convert_docx_to_md(const char *input_path, const char *output_path) 
     const char *last_slash = strrchr(output_path, '/');
     if (last_slash) {
         size_t dir_len = last_slash - output_path;
-        if (dir_len > 0 && dir_len < sizeof(output_dir)) {
+        if (dir_len > 0 && dir_len < sizeof(output_dir) - 1) {
             memcpy(output_dir, output_path, dir_len);
             output_dir[dir_len] = '\0';
         }

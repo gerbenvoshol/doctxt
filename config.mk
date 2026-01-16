@@ -5,8 +5,8 @@ PREFIX = /usr/local
 MANPREFIX = ${PREFIX}/share/man
 
 # includes and libs
-INCS = -I. -I/usr/include -I/usr/include/libxml2
-LIBS = -L/usr/lib -lxml2
+INCS = -I.
+LIBS = -L/usr/lib
 
 # flags
 CPPFLAGS = -DVERSION=\"${VERSION}\" -D_XOPEN_SOURCE=600

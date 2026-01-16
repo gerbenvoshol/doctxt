@@ -168,6 +168,16 @@ TXML_EXTERN size_t dom_childNodes(
 TXML_EXTERN const char *dom_getAttribute(
 	dom_node_t node, const char *name);
 
+TXML_EXTERN size_t txml_get_text_content(
+	struct txml_node *node, char *buffer, size_t buffer_size);
+/*	extracts all text content from a node and its descendants into buffer
+	returns the number of characters written (excluding null terminator)
+	
+	if buffer is NULL, only calculates and returns the required size
+	
+	useful for extracting concatenated text from complex structures
+*/
+
 #ifdef TXML_DEFINE
 
 enum txml_parse_states
@@ -680,6 +690,39 @@ size_t dom_childNodes(
 	}
 
 	return count;
+}
+
+size_t txml_get_text_content(
+	struct txml_node *node, char *buffer, size_t buffer_size)
+{
+	if (!node) return 0;
+	
+	size_t total = 0;
+	struct txml_node *current = node;
+	struct txml_node *end = node + 1;
+	
+	/* Find the end boundary - need to scan until we're out of this subtree */
+	while (end->type != TXML_EOF && end->parent >= node) {
+		end++;
+	}
+	
+	/* Traverse all descendants looking for text nodes */
+	while (current < end && current->type != TXML_EOF) {
+		if (current->type == TXML_TEXT && current->value) {
+			size_t len = strlen(current->value);
+			if (buffer && total + len < buffer_size) {
+				memcpy(buffer + total, current->value, len);
+			}
+			total += len;
+		}
+		current++;
+	}
+	
+	if (buffer && total < buffer_size) {
+		buffer[total] = '\0';
+	}
+	
+	return total;
 }
 
 #ifdef TXML_EXAMPLE

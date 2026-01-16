@@ -152,7 +152,13 @@ static void parse_relationships(const char *docx_path, md_context *ctx) {
     /* Parse the relationships XML using txml_parse_file */
     struct txml_node *nodes = NULL;
     char *xml_data = txml_parse_file(temp_path, &nodes);
-    if (!xml_data || !nodes) {
+    if (!xml_data) {
+        if (nodes) free(nodes);
+        remove(temp_path);
+        return;
+    }
+    if (!nodes) {
+        free(xml_data);
         remove(temp_path);
         return;
     }
@@ -196,9 +202,18 @@ static void parse_relationships(const char *docx_path, md_context *ctx) {
             struct txml_node *target_attr = txml_find(rel, NULL, TXML_ATTRIBUTE, "Target", NULL, 0);
             
             if (id_attr && id_attr->value && target_attr && target_attr->value) {
-                ctx->image_rels[idx].rel_id = strdup(id_attr->value);
-                ctx->image_rels[idx].target = strdup(target_attr->value);
-                idx++;
+                char *rel_id = strdup(id_attr->value);
+                char *target = strdup(target_attr->value);
+                
+                if (rel_id && target) {
+                    ctx->image_rels[idx].rel_id = rel_id;
+                    ctx->image_rels[idx].target = target;
+                    idx++;
+                } else {
+                    /* Handle allocation failure */
+                    free(rel_id);
+                    free(target);
+                }
             }
         }
     }
@@ -233,7 +248,12 @@ static const char *find_image_target(md_context *ctx, const char *rel_id) {
 
 /* Extract image from ZIP to output directory */
 static char *extract_image(md_context *ctx, const char *target) {
-    /* Build the full path in the ZIP archive */
+    /* Build the full path in the ZIP archive - validate length */
+    if (strlen(target) > 500) {
+        /* Target path too long */
+        return NULL;
+    }
+    
     char zip_path[512];
     snprintf(zip_path, sizeof(zip_path), "word/%s", target);
     
@@ -256,6 +276,15 @@ static char *extract_image(md_context *ctx, const char *target) {
         filename = target;
     } else {
         filename++; /* Skip the '/' */
+    }
+    
+    /* Validate combined path length */
+    size_t output_dir_len = ctx->output_dir ? strlen(ctx->output_dir) : 0;
+    size_t filename_len = strlen(filename);
+    if (output_dir_len + filename_len + 2 > 1020) {
+        /* Combined path too long */
+        mz_free(file_data);
+        return NULL;
     }
     
     /* Build output path */

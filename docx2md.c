@@ -26,6 +26,12 @@ static char *get_temp_file_path(void) {
     return temp_path;
 }
 
+/* Structure to hold image relationship information */
+typedef struct {
+    char *rel_id;       /* Relationship ID (e.g., "rId3") */
+    char *target;       /* Target path (e.g., "media/image1.png") */
+} image_rel;
+
 /* Context structure to hold state during conversion */
 typedef struct {
     FILE *output;
@@ -37,12 +43,19 @@ typedef struct {
     int in_table;
     int table_col_count;
     int first_table_row;
+    mz_zip_archive *zip;        /* ZIP archive for extracting images */
+    image_rel *image_rels;      /* Array of image relationships */
+    int image_rel_count;        /* Number of image relationships */
+    const char *output_dir;     /* Directory for output file (for extracting images) */
 } md_context;
 
 /* Forward declarations */
 static void process_paragraph(struct txml_node *para, md_context *ctx);
 static void process_run(struct txml_node *run, md_context *ctx);
 static void process_table(struct txml_node *table, md_context *ctx);
+static void process_drawing(struct txml_node *drawing, md_context *ctx);
+static void parse_relationships(const char *docx_path, md_context *ctx);
+static void free_image_rels(md_context *ctx);
 static char *xml_unescape(const char *in);
 
 /* XML unescape helper */
@@ -107,6 +120,209 @@ static int has_horizontal_rule(struct txml_node *para) {
     return bottom != NULL;
 }
 
+/* Parse relationships from document.xml.rels to get image mappings */
+static void parse_relationships(const char *docx_path, md_context *ctx) {
+    mz_zip_archive *zip = ctx->zip;
+    
+    /* Extract document.xml.rels */
+    int file_index = mz_zip_reader_locate_file(zip, "word/_rels/document.xml.rels", NULL, 0);
+    if (file_index < 0) {
+        /* No relationships file - no images */
+        return;
+    }
+    
+    size_t file_size;
+    void *file_data = mz_zip_reader_extract_to_heap(zip, file_index, &file_size, 0);
+    if (!file_data) {
+        return;
+    }
+    
+    /* Write to temporary file for txml_parse_file */
+    char temp_path[256];
+    snprintf(temp_path, sizeof(temp_path), "/tmp/docx2md-rels-%d.xml", getpid());
+    FILE *temp = fopen(temp_path, "wb");
+    if (!temp) {
+        mz_free(file_data);
+        return;
+    }
+    fwrite(file_data, 1, file_size, temp);
+    fclose(temp);
+    mz_free(file_data);
+    
+    /* Parse the relationships XML using txml_parse_file */
+    struct txml_node *nodes = NULL;
+    char *xml_data = txml_parse_file(temp_path, &nodes);
+    if (!xml_data || !nodes) {
+        remove(temp_path);
+        return;
+    }
+    
+    /* Count image relationships first - use recursive search from root */
+    ctx->image_rel_count = 0;
+    struct txml_node *rel = NULL;
+    while ((rel = txml_find(nodes, rel, TXML_ELEMENT, "Relationship", NULL, 1))) {
+        struct txml_node *type_attr = txml_find(rel, NULL, TXML_ATTRIBUTE, "Type", NULL, 0);
+        if (type_attr && type_attr->value && 
+            strstr(type_attr->value, "/image") != NULL) {
+            ctx->image_rel_count++;
+        }
+    }
+    
+    if (ctx->image_rel_count == 0) {
+        free(nodes);
+        free(xml_data);
+        remove(temp_path);
+        return;
+    }
+    
+    /* Allocate array for relationships */
+    ctx->image_rels = calloc(ctx->image_rel_count, sizeof(image_rel));
+    if (!ctx->image_rels) {
+        free(nodes);
+        free(xml_data);
+        remove(temp_path);
+        return;
+    }
+    
+    /* Fill in the relationship data */
+    int idx = 0;
+    rel = NULL;
+    while ((rel = txml_find(nodes, rel, TXML_ELEMENT, "Relationship", NULL, 1)) && idx < ctx->image_rel_count) {
+        struct txml_node *type_attr = txml_find(rel, NULL, TXML_ATTRIBUTE, "Type", NULL, 0);
+        if (type_attr && type_attr->value && 
+            strstr(type_attr->value, "/image") != NULL) {
+            
+            struct txml_node *id_attr = txml_find(rel, NULL, TXML_ATTRIBUTE, "Id", NULL, 0);
+            struct txml_node *target_attr = txml_find(rel, NULL, TXML_ATTRIBUTE, "Target", NULL, 0);
+            
+            if (id_attr && id_attr->value && target_attr && target_attr->value) {
+                ctx->image_rels[idx].rel_id = strdup(id_attr->value);
+                ctx->image_rels[idx].target = strdup(target_attr->value);
+                idx++;
+            }
+        }
+    }
+    
+    free(nodes);
+    free(xml_data);
+    remove(temp_path);
+}
+
+/* Free image relationships */
+static void free_image_rels(md_context *ctx) {
+    if (ctx->image_rels) {
+        for (int i = 0; i < ctx->image_rel_count; i++) {
+            free(ctx->image_rels[i].rel_id);
+            free(ctx->image_rels[i].target);
+        }
+        free(ctx->image_rels);
+        ctx->image_rels = NULL;
+        ctx->image_rel_count = 0;
+    }
+}
+
+/* Find image target by relationship ID */
+static const char *find_image_target(md_context *ctx, const char *rel_id) {
+    for (int i = 0; i < ctx->image_rel_count; i++) {
+        if (strcmp(ctx->image_rels[i].rel_id, rel_id) == 0) {
+            return ctx->image_rels[i].target;
+        }
+    }
+    return NULL;
+}
+
+/* Extract image from ZIP to output directory */
+static char *extract_image(md_context *ctx, const char *target) {
+    /* Build the full path in the ZIP archive */
+    char zip_path[512];
+    snprintf(zip_path, sizeof(zip_path), "word/%s", target);
+    
+    /* Find the image in the ZIP */
+    int file_index = mz_zip_reader_locate_file(ctx->zip, zip_path, NULL, 0);
+    if (file_index < 0) {
+        return NULL;
+    }
+    
+    /* Extract to heap */
+    size_t file_size;
+    void *file_data = mz_zip_reader_extract_to_heap(ctx->zip, file_index, &file_size, 0);
+    if (!file_data) {
+        return NULL;
+    }
+    
+    /* Get just the filename from the target path */
+    const char *filename = strrchr(target, '/');
+    if (!filename) {
+        filename = target;
+    } else {
+        filename++; /* Skip the '/' */
+    }
+    
+    /* Build output path */
+    char output_path[1024];
+    if (ctx->output_dir && ctx->output_dir[0] != '\0') {
+        snprintf(output_path, sizeof(output_path), "%s/%s", ctx->output_dir, filename);
+    } else {
+        snprintf(output_path, sizeof(output_path), "%s", filename);
+    }
+    
+    /* Write the image file */
+    FILE *img_file = fopen(output_path, "wb");
+    if (!img_file) {
+        mz_free(file_data);
+        return NULL;
+    }
+    
+    fwrite(file_data, 1, file_size, img_file);
+    fclose(img_file);
+    mz_free(file_data);
+    
+    /* Return just the filename for markdown */
+    return strdup(filename);
+}
+
+/* Process a drawing element (image) */
+static void process_drawing(struct txml_node *drawing, md_context *ctx) {
+    /* Find the blip element which contains the relationship ID */
+    struct txml_node *blip = txml_find(drawing, NULL, TXML_ELEMENT, "a:blip", NULL, 1);
+    if (!blip) {
+        return;
+    }
+    
+    /* Get the r:embed attribute */
+    struct txml_node *embed_attr = txml_find(blip, NULL, TXML_ATTRIBUTE, "r:embed", NULL, 0);
+    if (!embed_attr || !embed_attr->value) {
+        return;
+    }
+    
+    /* Find the image target path using the relationship ID */
+    const char *target = find_image_target(ctx, embed_attr->value);
+    if (!target) {
+        return;
+    }
+    
+    /* Extract the image to the output directory */
+    char *image_filename = extract_image(ctx, target);
+    if (!image_filename) {
+        return;
+    }
+    
+    /* Find alt text from docPr name attribute */
+    struct txml_node *docPr = txml_find(drawing, NULL, TXML_ELEMENT, "wp:docPr", NULL, 1);
+    const char *alt_text = "Image";
+    if (docPr) {
+        struct txml_node *name_attr = txml_find(docPr, NULL, TXML_ATTRIBUTE, "name", NULL, 0);
+        if (name_attr && name_attr->value) {
+            alt_text = name_attr->value;
+        }
+    }
+    
+    /* Output markdown image syntax */
+    fprintf(ctx->output, "![%s](%s)", alt_text, image_filename);
+    
+    free(image_filename);
+}
+
 /* Check if text run has formatting */
 static void check_run_formatting(struct txml_node *run, md_context *ctx) {
     struct txml_node *rPr = txml_find(run, NULL, TXML_ELEMENT, "w:rPr", NULL, 0);
@@ -134,6 +350,18 @@ static void process_run(struct txml_node *run, md_context *ctx) {
     int old_strike = ctx->in_strikethrough;
     
     check_run_formatting(run, ctx);
+    
+    /* Check for drawing (image) first */
+    struct txml_node *drawing = txml_find(run, NULL, TXML_ELEMENT, "w:drawing", NULL, 0);
+    if (drawing) {
+        process_drawing(drawing, ctx);
+        /* Reset to old state */
+        ctx->in_bold = old_bold;
+        ctx->in_italic = old_italic;
+        ctx->in_code = old_code;
+        ctx->in_strikethrough = old_strike;
+        return;
+    }
     
     /* Extract text content first to check if run is empty */
     struct txml_node *text_node = txml_find(run, NULL, TXML_ELEMENT, "w:t", NULL, 0);
@@ -304,56 +532,48 @@ static void process_table(struct txml_node *table, md_context *ctx) {
     ctx->in_table = 0;
 }
 
-/* Extract document.xml from DOCX and write to temp file */
-static int extract_document_xml(const char *docx_path, const char *temp_file) {
+/* Convert DOCX to Markdown */
+static void convert_docx_to_md(const char *input_path, const char *output_path) {
+    const char *temp_file = get_temp_file_path();
+    
+    /* Open ZIP archive for image extraction */
     mz_zip_archive zip;
     memset(&zip, 0, sizeof(zip));
     
-    if (!mz_zip_reader_init_file(&zip, docx_path, 0)) {
-        return 0;
+    if (!mz_zip_reader_init_file(&zip, input_path, 0)) {
+        die("Failed to open DOCX file: %s", input_path);
     }
     
+    /* Extract document.xml from DOCX */
     int file_index = mz_zip_reader_locate_file(&zip, "word/document.xml", NULL, 0);
     if (file_index < 0) {
         mz_zip_reader_end(&zip);
-        return 0;
+        die("Failed to find document.xml in: %s", input_path);
     }
     
     size_t file_size;
     void *file_data = mz_zip_reader_extract_to_heap(&zip, file_index, &file_size, 0);
     if (!file_data) {
         mz_zip_reader_end(&zip);
-        return 0;
+        die("Failed to extract document.xml from: %s", input_path);
     }
     
     FILE *temp = fopen(temp_file, "wb");
     if (!temp) {
         mz_free(file_data);
         mz_zip_reader_end(&zip);
-        return 0;
+        die("Failed to create temporary file: %s", temp_file);
     }
     
     fwrite(file_data, 1, file_size, temp);
     fclose(temp);
-    
     mz_free(file_data);
-    mz_zip_reader_end(&zip);
-    return 1;
-}
-
-/* Convert DOCX to Markdown */
-static void convert_docx_to_md(const char *input_path, const char *output_path) {
-    const char *temp_file = get_temp_file_path();
-    
-    /* Extract document.xml from DOCX */
-    if (!extract_document_xml(input_path, temp_file)) {
-        die("Failed to extract document.xml from: %s", input_path);
-    }
     
     /* Parse XML */
     struct txml_node *nodes = NULL;
     char *xml_data = txml_parse_file((char *)temp_file, &nodes);  /* txml_parse_file modifies path string */
     if (!xml_data) {
+        mz_zip_reader_end(&zip);
         die("Failed to parse document XML");
     }
     
@@ -362,12 +582,29 @@ static void convert_docx_to_md(const char *input_path, const char *output_path) 
     if (!output) {
         free(nodes);
         free(xml_data);
+        mz_zip_reader_end(&zip);
         die("Failed to open output file: %s", output_path);
+    }
+    
+    /* Extract output directory from output path */
+    char output_dir[1024] = "";
+    const char *last_slash = strrchr(output_path, '/');
+    if (last_slash) {
+        size_t dir_len = last_slash - output_path;
+        if (dir_len > 0 && dir_len < sizeof(output_dir)) {
+            memcpy(output_dir, output_path, dir_len);
+            output_dir[dir_len] = '\0';
+        }
     }
     
     /* Initialize context */
     md_context ctx = {0};
     ctx.output = output;
+    ctx.zip = &zip;
+    ctx.output_dir = output_dir[0] ? output_dir : NULL;
+    
+    /* Parse relationships to find image mappings */
+    parse_relationships(input_path, &ctx);
     
     /* Find document body */
     struct txml_node *body = txml_find(nodes, NULL, TXML_ELEMENT, "w:body", NULL, 1);
@@ -375,6 +612,8 @@ static void convert_docx_to_md(const char *input_path, const char *output_path) 
         fclose(output);
         free(nodes);
         free(xml_data);
+        free_image_rels(&ctx);
+        mz_zip_reader_end(&zip);
         die("No w:body element found in document");
     }
     
@@ -400,6 +639,8 @@ static void convert_docx_to_md(const char *input_path, const char *output_path) 
     fclose(output);
     free(nodes);
     free(xml_data);
+    free_image_rels(&ctx);
+    mz_zip_reader_end(&zip);
     remove(temp_file);
 }
 

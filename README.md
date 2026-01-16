@@ -110,6 +110,7 @@ $ docx2md input.docx [-o output.md]
 - **Tables**: Full table support with headers
 - **Line breaks**: Manual line breaks within paragraphs
 - **Horizontal rules**: Paragraph borders
+- **Images**: Embedded images are extracted to the output directory
 
 **Example:**
 
@@ -122,7 +123,15 @@ $ docx2md notes.docx
 # Creates output.md
 ```
 
+**Image Support:**
+
+Images embedded in the DOCX file are automatically extracted to the same directory as the output markdown file and referenced using markdown image syntax:
+
+```markdown
+![Alt text](image1.png)
+```
+
 **Note:** 
 - The tool extracts text content and formatting from DOCX files
 - Hyperlinks are converted to plain text (link text without URLs, as URLs may not be stored in simple DOCX files)
-- Images are not yet extracted in this version
+- Images are extracted from the DOCX archive and saved to the output directory

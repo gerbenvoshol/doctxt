@@ -1,3 +1,7 @@
 *.o
 doctxt
+md2docx
 out.txt
+output.docx
+output.txt
+test/output.*

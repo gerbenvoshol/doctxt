@@ -698,16 +698,32 @@ size_t txml_get_text_content(
 	if (!node) return 0;
 	
 	size_t total = 0;
-	struct txml_node *current = node;
-	struct txml_node *end = node + 1;
+	struct txml_node *current = node + 1;  // Start with first child
 	
-	/* Find the end boundary - need to scan until we're out of this subtree */
-	while (end->type != TXML_EOF && end->parent >= node) {
-		end++;
-	}
-	
-	/* Traverse all descendants looking for text nodes */
-	while (current < end && current->type != TXML_EOF) {
+	/* Traverse descendants looking for text nodes
+	 * Stop when we encounter a node that's not a descendant (parent < node)
+	 * or we hit EOF marker */
+	while (current->type != TXML_EOF) {
+		/* Check if we've left the subtree by comparing parent relationship */
+		int is_descendant = 0;
+		struct txml_node *ancestor = current->parent;
+		while (ancestor && ancestor->type != TXML_EOF) {
+			if (ancestor == node) {
+				is_descendant = 1;
+				break;
+			}
+			/* Move up the tree - but be careful not to go past the root */
+			if (ancestor->parent == ancestor || ancestor <= node->parent) {
+				break;
+			}
+			ancestor = ancestor->parent;
+		}
+		
+		if (!is_descendant) {
+			break;  // We've left the subtree
+		}
+		
+		/* Extract text from text nodes */
 		if (current->type == TXML_TEXT && current->value) {
 			size_t len = strlen(current->value);
 			if (buffer && total + len < buffer_size) {

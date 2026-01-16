@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>
 
 #include "miniz.h"
 #include "util.h"
@@ -16,8 +17,14 @@
 #include "txml.h"
 
 #define VERSION_STR "0.1"
-#define TEMPFILE "/tmp/docx2md-temp.xml"
 #define MAX_BUFFER_SIZE (10 * 1024 * 1024)
+
+/* Generate temporary file path - Note: caller should remove the file when done */
+static char *get_temp_file_path(void) {
+    static char temp_path[256];
+    snprintf(temp_path, sizeof(temp_path), "/tmp/docx2md-temp-%d.xml", getpid());
+    return temp_path;
+}
 
 /* Context structure to hold state during conversion */
 typedef struct {
@@ -42,7 +49,7 @@ static char *xml_unescape(const char *in);
 static char *xml_unescape(const char *in) {
     if (!in) return NULL;
     
-    char *out = malloc(strlen(in) * 2);
+    char *out = malloc(strlen(in) + 1);  // Output will never be longer than input
     if (!out) return NULL;
     
     char *dst = out;
@@ -276,7 +283,7 @@ static void process_table(struct txml_node *table, md_context *ctx) {
 }
 
 /* Extract document.xml from DOCX and write to temp file */
-static int extract_document_xml(const char *docx_path) {
+static int extract_document_xml(const char *docx_path, const char *temp_file) {
     mz_zip_archive zip;
     memset(&zip, 0, sizeof(zip));
     
@@ -297,7 +304,7 @@ static int extract_document_xml(const char *docx_path) {
         return 0;
     }
     
-    FILE *temp = fopen(TEMPFILE, "wb");
+    FILE *temp = fopen(temp_file, "wb");
     if (!temp) {
         mz_free(file_data);
         mz_zip_reader_end(&zip);
@@ -314,14 +321,16 @@ static int extract_document_xml(const char *docx_path) {
 
 /* Convert DOCX to Markdown */
 static void convert_docx_to_md(const char *input_path, const char *output_path) {
+    const char *temp_file = get_temp_file_path();
+    
     /* Extract document.xml from DOCX */
-    if (!extract_document_xml(input_path)) {
+    if (!extract_document_xml(input_path, temp_file)) {
         die("Failed to extract document.xml from: %s", input_path);
     }
     
     /* Parse XML */
     struct txml_node *nodes = NULL;
-    char *xml_data = txml_parse_file(TEMPFILE, &nodes);
+    char *xml_data = txml_parse_file((char *)temp_file, &nodes);
     if (!xml_data) {
         die("Failed to parse document XML");
     }
@@ -365,7 +374,7 @@ static void convert_docx_to_md(const char *input_path, const char *output_path) 
     fclose(output);
     free(nodes);
     free(xml_data);
-    remove(TEMPFILE);
+    remove(temp_file);
 }
 
 /* Usage information */

@@ -174,6 +174,10 @@ TXML_EXTERN size_t txml_get_text_content(
  * Returns the number of characters written (excluding null terminator).
  * If buffer is NULL, only calculates and returns the required size.
  * Useful for extracting concatenated text from complex structures.
+ * 
+ * NOTE: This is a utility function added to extend txml.h.
+ * Not currently used in the codebase but provided for future use cases
+ * where extracting all text from a subtree is needed in a single call.
  */
 
 #ifdef TXML_DEFINE

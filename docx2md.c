@@ -330,7 +330,7 @@ static void convert_docx_to_md(const char *input_path, const char *output_path) 
     
     /* Parse XML */
     struct txml_node *nodes = NULL;
-    char *xml_data = txml_parse_file((char *)temp_file, &nodes);
+    char *xml_data = txml_parse_file((char *)temp_file, &nodes);  /* txml_parse_file modifies path string */
     if (!xml_data) {
         die("Failed to parse document XML");
     }
@@ -356,7 +356,11 @@ static void convert_docx_to_md(const char *input_path, const char *output_path) 
         die("No w:body element found in document");
     }
     
-    /* Process document content in order - paragraphs and tables */
+    /* Process document content in order - paragraphs and tables 
+     * Note: We use pointer arithmetic here because txml stores nodes in a contiguous array.
+     * This is the documented way to traverse nodes in document order.
+     * Using txml_find() would not preserve the interleaved order of paragraphs and tables.
+     */
     struct txml_node *child = body + 1;
     while (child && child->type != TXML_EOF) {
         /* Check if this node is a direct child of body */

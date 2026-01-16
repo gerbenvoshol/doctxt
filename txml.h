@@ -170,13 +170,11 @@ TXML_EXTERN const char *dom_getAttribute(
 
 TXML_EXTERN size_t txml_get_text_content(
 	struct txml_node *node, char *buffer, size_t buffer_size);
-/*	extracts all text content from a node and its descendants into buffer
-	returns the number of characters written (excluding null terminator)
-	
-	if buffer is NULL, only calculates and returns the required size
-	
-	useful for extracting concatenated text from complex structures
-*/
+/* Extracts all text content from a node and its descendants into buffer.
+ * Returns the number of characters written (excluding null terminator).
+ * If buffer is NULL, only calculates and returns the required size.
+ * Useful for extracting concatenated text from complex structures.
+ */
 
 #ifdef TXML_DEFINE
 
@@ -700,20 +698,24 @@ size_t txml_get_text_content(
 	size_t total = 0;
 	struct txml_node *current = node + 1;  // Start with first child
 	
-	/* Traverse descendants looking for text nodes
-	 * Stop when we encounter a node that's not a descendant (parent < node)
-	 * or we hit EOF marker */
+	/* Traverse descendants looking for text nodes.
+	 * We stop when we encounter a node that's not a descendant.
+	 * To check if a node is a descendant, we walk up its parent chain
+	 * looking for our target node.
+	 */
 	while (current->type != TXML_EOF) {
-		/* Check if we've left the subtree by comparing parent relationship */
+		/* Check if current node is a descendant by walking up parent chain */
 		int is_descendant = 0;
 		struct txml_node *ancestor = current->parent;
-		while (ancestor && ancestor->type != TXML_EOF) {
+		
+		/* Walk up the parent chain - descendants will eventually reach 'node' */
+		while (ancestor) {
 			if (ancestor == node) {
 				is_descendant = 1;
 				break;
 			}
-			/* Move up the tree - but be careful not to go past the root */
-			if (ancestor->parent == ancestor || ancestor <= node->parent) {
+			/* Stop if we've reached a root node (parent points to itself or NULL) */
+			if (ancestor->type == TXML_EOF || ancestor->parent == ancestor) {
 				break;
 			}
 			ancestor = ancestor->parent;

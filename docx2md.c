@@ -356,11 +356,11 @@ static void convert_docx_to_md(const char *input_path, const char *output_path) 
         die("No w:body element found in document");
     }
     
-    /* Process document content - need to handle paragraphs and tables in order */
-    /* Due to txml API, we process them separately which may not preserve exact order */
+    /* Process document content in order - paragraphs and tables */
     struct txml_node *child = body + 1;
-    while (child && child->parent >= body && child->type != TXML_EOF) {
-        if (child->type == TXML_ELEMENT && child->parent == body) {
+    while (child && child->type != TXML_EOF) {
+        /* Check if this node is a direct child of body */
+        if (child->parent == body && child->type == TXML_ELEMENT) {
             if (strcmp(child->name, "w:p") == 0) {
                 process_paragraph(child, &ctx);
             } else if (strcmp(child->name, "w:tbl") == 0) {

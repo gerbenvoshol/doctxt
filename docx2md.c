@@ -50,7 +50,9 @@ static char *xml_unescape(const char *in) {
     if (!in) return NULL;
     
     char *out = malloc(strlen(in) + 1);  // Output will never be longer than input
-    if (!out) return NULL;
+    if (!out) {
+        die("Out of memory in xml_unescape");
+    }
     
     char *dst = out;
     const char *src = in;

@@ -54,8 +54,9 @@ static void xml_escape_append(docx_context *ctx, const char *text, size_t size)
             default:   
                 if (ctx->xml_size >= ctx->xml_capacity - 1) {
                     ctx->xml_capacity *= 2;
-                    ctx->xml_buffer = realloc(ctx->xml_buffer, ctx->xml_capacity);
-                    if (!ctx->xml_buffer) die("Out of memory");
+                    char *new_buffer = realloc(ctx->xml_buffer, ctx->xml_capacity);
+                    if (!new_buffer) die("Out of memory");
+                    ctx->xml_buffer = new_buffer;
                 }
                 ctx->xml_buffer[ctx->xml_size++] = text[i];
                 break;
@@ -69,8 +70,9 @@ static void append_xml(docx_context *ctx, const char *str)
     size_t len = strlen(str);
     while (ctx->xml_size + len >= ctx->xml_capacity) {
         ctx->xml_capacity *= 2;
-        ctx->xml_buffer = realloc(ctx->xml_buffer, ctx->xml_capacity);
-        if (!ctx->xml_buffer) die("Out of memory");
+        char *new_buffer = realloc(ctx->xml_buffer, ctx->xml_capacity);
+        if (!new_buffer) die("Out of memory");
+        ctx->xml_buffer = new_buffer;
     }
     memcpy(ctx->xml_buffer + ctx->xml_size, str, len);
     ctx->xml_size += len;
@@ -80,8 +82,9 @@ static void append_xml_n(docx_context *ctx, const char *str, size_t len)
 {
     while (ctx->xml_size + len >= ctx->xml_capacity) {
         ctx->xml_capacity *= 2;
-        ctx->xml_buffer = realloc(ctx->xml_buffer, ctx->xml_capacity);
-        if (!ctx->xml_buffer) die("Out of memory");
+        char *new_buffer = realloc(ctx->xml_buffer, ctx->xml_capacity);
+        if (!new_buffer) die("Out of memory");
+        ctx->xml_buffer = new_buffer;
     }
     memcpy(ctx->xml_buffer + ctx->xml_size, str, len);
     ctx->xml_size += len;
@@ -117,8 +120,9 @@ static void add_image(docx_context *ctx, const char *path, size_t path_len)
 {
     if (ctx->image_count >= ctx->image_capacity) {
         ctx->image_capacity = ctx->image_capacity ? ctx->image_capacity * 2 : 8;
-        ctx->image_paths = realloc(ctx->image_paths, ctx->image_capacity * sizeof(char*));
-        if (!ctx->image_paths) die("Out of memory");
+        char **new_paths = realloc(ctx->image_paths, ctx->image_capacity * sizeof(char*));
+        if (!new_paths) die("Out of memory");
+        ctx->image_paths = new_paths;
     }
     
     ctx->image_paths[ctx->image_count] = malloc(path_len + 1);
@@ -126,6 +130,19 @@ static void add_image(docx_context *ctx, const char *path, size_t path_len)
     memcpy(ctx->image_paths[ctx->image_count], path, path_len);
     ctx->image_paths[ctx->image_count][path_len] = '\0';
     ctx->image_count++;
+}
+
+/* Free image paths */
+static void free_image_paths(docx_context *ctx)
+{
+    if (ctx->image_paths) {
+        for (int i = 0; i < ctx->image_count; i++) {
+            free(ctx->image_paths[i]);
+        }
+        free(ctx->image_paths);
+        ctx->image_paths = NULL;
+        ctx->image_count = 0;
+    }
 }
 
 /* Markdown callback: enter block */
@@ -537,8 +554,12 @@ static char *get_document_rels_xml(docx_context *ctx)
         
         while (len + n >= capacity) {
             capacity *= 2;
-            xml = realloc(xml, capacity);
-            if (!xml) return NULL;
+            char *new_xml = realloc(xml, capacity);
+            if (!new_xml) {
+                free(xml);
+                return NULL;
+            }
+            xml = new_xml;
         }
         
         memcpy(xml + len, buf, n);
@@ -548,8 +569,12 @@ static char *get_document_rels_xml(docx_context *ctx)
     const char *end = "</Relationships>";
     while (len + strlen(end) >= capacity) {
         capacity *= 2;
-        xml = realloc(xml, capacity);
-        if (!xml) return NULL;
+        char *new_xml = realloc(xml, capacity);
+        if (!new_xml) {
+            free(xml);
+            return NULL;
+        }
+        xml = new_xml;
     }
     strcpy(xml + len, end);
     
@@ -609,8 +634,12 @@ static char *get_document_xml(docx_context *ctx)
     
     if (total > capacity) {
         capacity = total;
-        xml = realloc(xml, capacity);
-        if (!xml) return NULL;
+        char *new_xml = realloc(xml, capacity);
+        if (!new_xml) {
+            free(xml);
+            return NULL;
+        }
+        xml = new_xml;
     }
     
     strcpy(xml, header);
@@ -665,13 +694,19 @@ static int convert_markdown_to_docx(const char *md_file, const char *docx_file)
     if (ret != 0) {
         fprintf(stderr, "Error: Failed to parse markdown (code %d)\n", ret);
         free(ctx.xml_buffer);
+        free_image_paths(&ctx);
         return 1;
     }
     
     // Null-terminate XML buffer
     if (ctx.xml_size >= ctx.xml_capacity) {
-        ctx.xml_buffer = realloc(ctx.xml_buffer, ctx.xml_size + 1);
-        if (!ctx.xml_buffer) die("Out of memory");
+        char *new_buffer = realloc(ctx.xml_buffer, ctx.xml_size + 1);
+        if (!new_buffer) {
+            free(ctx.xml_buffer);
+            free_image_paths(&ctx);
+            die("Out of memory");
+        }
+        ctx.xml_buffer = new_buffer;
     }
     ctx.xml_buffer[ctx.xml_size] = '\0';
     
@@ -680,6 +715,7 @@ static int convert_markdown_to_docx(const char *md_file, const char *docx_file)
     if (!mz_zip_writer_init_file(&zip, docx_file, 0)) {
         fprintf(stderr, "Error: Cannot create output file '%s'\n", docx_file);
         free(ctx.xml_buffer);
+        free_image_paths(&ctx);
         return 1;
     }
     
@@ -720,7 +756,6 @@ static int convert_markdown_to_docx(const char *md_file, const char *docx_file)
             add_file_to_zip(&zip, archive_name, img_data, img_size);
             free(img_data);
         }
-        free(ctx.image_paths[i]);
     }
     
     // Finalize ZIP
@@ -728,13 +763,13 @@ static int convert_markdown_to_docx(const char *md_file, const char *docx_file)
         fprintf(stderr, "Error: Failed to finalize ZIP archive\n");
         mz_zip_writer_end(&zip);
         free(ctx.xml_buffer);
-        free(ctx.image_paths);
+        free_image_paths(&ctx);
         return 1;
     }
     
     mz_zip_writer_end(&zip);
     free(ctx.xml_buffer);
-    free(ctx.image_paths);
+    free_image_paths(&ctx);
     
     printf("Successfully converted '%s' to '%s'\n", md_file, docx_file);
     return 0;

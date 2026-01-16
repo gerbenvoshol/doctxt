@@ -3,7 +3,7 @@ include config.mk
 SRC = doctxt.c util.c miniz.c
 OBJ = ${SRC:.c=.o}
 
-MD2DOCX_SRC = md2docx.c util.c miniz.c
+MD2DOCX_SRC = md2docx.c util.c miniz.c md4c.c
 MD2DOCX_OBJ = ${MD2DOCX_SRC:.c=.o}
 
 all: options doctxt md2docx
@@ -24,9 +24,9 @@ doctxt: ${OBJ}
 	@echo CC -o $@
 	@${CC} -o $@ ${OBJ} ${LDFLAGS}
 
-md2docx: md2docx.o util.o miniz.o
+md2docx: md2docx.o util.o miniz.o md4c.o
 	@echo CC -o $@
-	@${CC} -o $@ md2docx.o util.o miniz.o ${LDFLAGS} -lmd4c
+	@${CC} -o $@ md2docx.o util.o miniz.o md4c.o ${LDFLAGS}
 
 clean:
 	@echo cleaning

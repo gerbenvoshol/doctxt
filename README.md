@@ -8,17 +8,14 @@ doctxt is a simple, fast bidirectional conversion tool written in C:
 
 ### For building
 
-- libxml2 (for doctxt)
-- libzip (for doctxt)
-- libmd4c (for md2docx)
+No external libraries required! This project uses embedded dependencies:
+- **txml** (embedded) - for XML parsing in doctxt
+- **miniz** (embedded) - for ZIP handling in both tools
+- **md4c** (embedded) - for Markdown parsing in md2docx
 
-```sh
-$ apt install libxml2-dev libzip-dev libmd4c-dev
-```
+Just a C compiler is needed.
 
 ### Installation
-
-Install dependencies first.
 
 ```sh
 $ make clean

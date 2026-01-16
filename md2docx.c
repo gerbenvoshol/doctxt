@@ -318,9 +318,12 @@ static int enter_span_callback(MD_SPANTYPE type, void *detail, void *userdata)
             MD_SPAN_IMG_DETAIL *img = (MD_SPAN_IMG_DETAIL *)detail;
             // Track image for embedding
             if (img->src.size > 0) {
+                int current_img_index = ctx->image_count;
                 add_image(ctx, img->src.text, img->src.size);
                 
                 // Embed image in document
+                // Image relationship IDs start at rId3 (rId1=styles, rId2=numbering)
+                int rel_id = current_img_index + 3;
                 char buf[1024];
                 int img_id = ctx->next_image_id++;
                 snprintf(buf, sizeof(buf),
@@ -333,7 +336,7 @@ static int enter_span_callback(MD_SPANTYPE type, void *detail, void *userdata)
                     "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"2000000\" cy=\"2000000\"/></a:xfrm>"
                     "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>"
                     "</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>",
-                    img_id, img_id, img_id, img_id, img_id + 1);
+                    img_id, img_id, img_id, img_id, rel_id);
                 append_xml(ctx, buf);
             }
             // Images don't have content text, so don't set in_span

@@ -135,24 +135,44 @@ static void process_run(struct txml_node *run, md_context *ctx) {
     
     check_run_formatting(run, ctx);
     
-    /* Open formatting markers */
-    if (ctx->in_strikethrough && !old_strike) fprintf(ctx->output, "~~");
-    if (ctx->in_bold && !old_bold) fprintf(ctx->output, "**");
-    if (ctx->in_italic && !old_italic) fprintf(ctx->output, "*");
-    if (ctx->in_code && !old_code) fprintf(ctx->output, "`");
-    
-    /* Extract text content */
+    /* Extract text content first to check if run is empty */
     struct txml_node *text_node = txml_find(run, NULL, TXML_ELEMENT, "w:t", NULL, 0);
+    char *unescaped = NULL;
+    int has_text = 0;
+    
     if (text_node && text_node->value) {
-        char *unescaped = xml_unescape(text_node->value);
-        if (unescaped) {
-            fprintf(ctx->output, "%s", unescaped);
-            free(unescaped);
+        unescaped = xml_unescape(text_node->value);
+        if (unescaped && unescaped[0] != '\0') {
+            has_text = 1;
         }
     }
     
     /* Check for line break */
     struct txml_node *br = txml_find(run, NULL, TXML_ELEMENT, "w:br", NULL, 0);
+    
+    /* Skip empty runs (no text and no line break), but reset to old state */
+    if (!has_text && !br) {
+        if (unescaped) free(unescaped);
+        /* Reset formatting to old state since we're skipping this run */
+        ctx->in_bold = old_bold;
+        ctx->in_italic = old_italic;
+        ctx->in_code = old_code;
+        ctx->in_strikethrough = old_strike;
+        return;
+    }
+    
+    /* Open formatting markers only if run has content */
+    if (ctx->in_strikethrough && !old_strike) fprintf(ctx->output, "~~");
+    if (ctx->in_bold && !old_bold) fprintf(ctx->output, "**");
+    if (ctx->in_italic && !old_italic) fprintf(ctx->output, "*");
+    if (ctx->in_code && !old_code) fprintf(ctx->output, "`");
+    
+    /* Output text content */
+    if (has_text && unescaped) {
+        fprintf(ctx->output, "%s", unescaped);
+        free(unescaped);
+    }
+    
     if (br) {
         fprintf(ctx->output, "  \n");
     }

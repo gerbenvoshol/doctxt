@@ -168,6 +168,18 @@ TXML_EXTERN size_t dom_childNodes(
 TXML_EXTERN const char *dom_getAttribute(
 	dom_node_t node, const char *name);
 
+TXML_EXTERN size_t txml_get_text_content(
+	struct txml_node *node, char *buffer, size_t buffer_size);
+/* Extracts all text content from a node and its descendants into buffer.
+ * Returns the number of characters written (excluding null terminator).
+ * If buffer is NULL, only calculates and returns the required size.
+ * Useful for extracting concatenated text from complex structures.
+ * 
+ * NOTE: This is a utility function added to extend txml.h.
+ * Not currently used in the codebase but provided for future use cases
+ * where extracting all text from a subtree is needed in a single call.
+ */
+
 #ifdef TXML_DEFINE
 
 enum txml_parse_states
@@ -680,6 +692,59 @@ size_t dom_childNodes(
 	}
 
 	return count;
+}
+
+size_t txml_get_text_content(
+	struct txml_node *node, char *buffer, size_t buffer_size)
+{
+	if (!node) return 0;
+	
+	size_t total = 0;
+	struct txml_node *current = node + 1;  // Start with first child
+	
+	/* Traverse descendants looking for text nodes.
+	 * We stop when we encounter a node that's not a descendant.
+	 * To check if a node is a descendant, we walk up its parent chain
+	 * looking for our target node.
+	 */
+	while (current->type != TXML_EOF) {
+		/* Check if current node is a descendant by walking up parent chain */
+		int is_descendant = 0;
+		struct txml_node *ancestor = current->parent;
+		
+		/* Walk up the parent chain - descendants will eventually reach 'node' */
+		while (ancestor) {
+			if (ancestor == node) {
+				is_descendant = 1;
+				break;
+			}
+			/* Stop if we've reached a root node (parent points to itself or NULL) */
+			if (ancestor->type == TXML_EOF || ancestor->parent == ancestor) {
+				break;
+			}
+			ancestor = ancestor->parent;
+		}
+		
+		if (!is_descendant) {
+			break;  // We've left the subtree
+		}
+		
+		/* Extract text from text nodes */
+		if (current->type == TXML_TEXT && current->value) {
+			size_t len = strlen(current->value);
+			if (buffer && total + len < buffer_size) {
+				memcpy(buffer + total, current->value, len);
+			}
+			total += len;
+		}
+		current++;
+	}
+	
+	if (buffer && total < buffer_size) {
+		buffer[total] = '\0';
+	}
+	
+	return total;
 }
 
 #ifdef TXML_EXAMPLE

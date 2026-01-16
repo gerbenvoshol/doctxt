@@ -1,6 +1,7 @@
 *.o
 doctxt
 md2docx
+docx2md
 out.txt
 output.docx
 output.txt

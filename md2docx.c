@@ -32,6 +32,13 @@ typedef struct {
     int image_count;
     int image_capacity;
     int next_image_id;
+    /* Track active formatting for proper nesting */
+    int format_bold;
+    int format_italic;
+    int format_code;
+    int format_strike;
+    int format_underline;
+    int run_has_text;  // Track if current run has any text content
 } docx_context;
 
 /* Forward declarations */
@@ -112,7 +119,56 @@ static void close_paragraph(docx_context *ctx)
         ctx->in_paragraph = 0;
         ctx->para_has_content = 0;
         ctx->in_span = 0;
+        // Reset formatting state
+        ctx->format_bold = 0;
+        ctx->format_italic = 0;
+        ctx->format_code = 0;
+        ctx->format_strike = 0;
+        ctx->format_underline = 0;
     }
+}
+
+/* Start a new text run with current formatting */
+static void start_text_run(docx_context *ctx)
+{
+    if (ctx->in_text_run) {
+        return; // Already in a text run
+    }
+    
+    append_xml(ctx, "<w:r>");
+    
+    // Apply formatting if any is active
+    if (ctx->format_bold || ctx->format_italic || ctx->format_code || 
+        ctx->format_strike || ctx->format_underline) {
+        append_xml(ctx, "<w:rPr>");
+        
+        if (ctx->format_bold) {
+            append_xml(ctx, "<w:b/>");
+        }
+        if (ctx->format_italic) {
+            append_xml(ctx, "<w:i/>");
+        }
+        if (ctx->format_code) {
+            append_xml(ctx, "<w:rStyle w:val=\"CodeChar\"/>");
+        }
+        if (ctx->format_strike) {
+            append_xml(ctx, "<w:strike/>");
+        }
+        if (ctx->format_underline) {
+            append_xml(ctx, "<w:u w:val=\"single\"/>");
+        }
+        
+        append_xml(ctx, "</w:rPr>");
+    }
+    
+    if (ctx->format_code) {
+        append_xml(ctx, "<w:t xml:space=\"preserve\">");
+    } else {
+        append_xml(ctx, "<w:t>");
+    }
+    
+    ctx->in_text_run = 1;
+    ctx->run_has_text = 0;  // New run starts with no text
 }
 
 /* Add image to tracking list */
@@ -307,26 +363,39 @@ static int enter_span_callback(MD_SPANTYPE type, void *detail, void *userdata)
     
     ensure_paragraph(ctx);
     
-    // Close any open text run before starting a new styled one
-    if (ctx->in_text_run) {
-        append_xml(ctx, "</w:t></w:r>");
-        ctx->in_text_run = 0;
-    }
-    
     switch (type) {
         case MD_SPAN_EM:
-            append_xml(ctx, "<w:r><w:rPr><w:i/></w:rPr><w:t>");
+            // Close current run if it exists
+            if (ctx->in_text_run) {
+                append_xml(ctx, "</w:t></w:r>");
+                ctx->in_text_run = 0;
+            }
+            // Update formatting and start new run
+            ctx->format_italic = 1;
+            start_text_run(ctx);
             ctx->in_span = 1;
             break;
             
         case MD_SPAN_STRONG:
-            append_xml(ctx, "<w:r><w:rPr><w:b/></w:rPr><w:t>");
+            // Close current run if it exists
+            if (ctx->in_text_run) {
+                append_xml(ctx, "</w:t></w:r>");
+                ctx->in_text_run = 0;
+            }
+            // Update formatting and start new run
+            ctx->format_bold = 1;
+            start_text_run(ctx);
             ctx->in_span = 1;
             break;
             
         case MD_SPAN_A: {
             // For now, just render as underlined text with href in []
-            append_xml(ctx, "<w:r><w:rPr><w:u w:val=\"single\"/></w:rPr><w:t>");
+            if (ctx->in_text_run) {
+                append_xml(ctx, "</w:t></w:r>");
+                ctx->in_text_run = 0;
+            }
+            ctx->format_underline = 1;
+            start_text_run(ctx);
             ctx->in_span = 1;
             break;
         }
@@ -361,17 +430,32 @@ static int enter_span_callback(MD_SPANTYPE type, void *detail, void *userdata)
         }
             
         case MD_SPAN_CODE:
-            append_xml(ctx, "<w:r><w:rPr><w:rStyle w:val=\"CodeChar\"/></w:rPr><w:t xml:space=\"preserve\">");
+            if (ctx->in_text_run) {
+                append_xml(ctx, "</w:t></w:r>");
+                ctx->in_text_run = 0;
+            }
+            ctx->format_code = 1;
+            start_text_run(ctx);
             ctx->in_span = 1;
             break;
             
         case MD_SPAN_DEL:
-            append_xml(ctx, "<w:r><w:rPr><w:strike/></w:rPr><w:t>");
+            if (ctx->in_text_run) {
+                append_xml(ctx, "</w:t></w:r>");
+                ctx->in_text_run = 0;
+            }
+            ctx->format_strike = 1;
+            start_text_run(ctx);
             ctx->in_span = 1;
             break;
             
         case MD_SPAN_U:
-            append_xml(ctx, "<w:r><w:rPr><w:u w:val=\"single\"/></w:rPr><w:t>");
+            if (ctx->in_text_run) {
+                append_xml(ctx, "</w:t></w:r>");
+                ctx->in_text_run = 0;
+            }
+            ctx->format_underline = 1;
+            start_text_run(ctx);
             ctx->in_span = 1;
             break;
             
@@ -391,12 +475,57 @@ static int leave_span_callback(MD_SPANTYPE type, void *detail, void *userdata)
     
     switch (type) {
         case MD_SPAN_EM:
+            // Close current run, clear formatting, start new run if needed
+            if (ctx->in_text_run) {
+                append_xml(ctx, "</w:t></w:r>");
+                ctx->in_text_run = 0;
+            }
+            ctx->format_italic = 0;
+            ctx->in_span = 0;
+            break;
+            
         case MD_SPAN_STRONG:
+            if (ctx->in_text_run) {
+                append_xml(ctx, "</w:t></w:r>");
+                ctx->in_text_run = 0;
+            }
+            ctx->format_bold = 0;
+            ctx->in_span = 0;
+            break;
+            
         case MD_SPAN_A:
+            if (ctx->in_text_run) {
+                append_xml(ctx, "</w:t></w:r>");
+                ctx->in_text_run = 0;
+            }
+            ctx->format_underline = 0;
+            ctx->in_span = 0;
+            break;
+            
         case MD_SPAN_CODE:
+            if (ctx->in_text_run) {
+                append_xml(ctx, "</w:t></w:r>");
+                ctx->in_text_run = 0;
+            }
+            ctx->format_code = 0;
+            ctx->in_span = 0;
+            break;
+            
         case MD_SPAN_DEL:
+            if (ctx->in_text_run) {
+                append_xml(ctx, "</w:t></w:r>");
+                ctx->in_text_run = 0;
+            }
+            ctx->format_strike = 0;
+            ctx->in_span = 0;
+            break;
+            
         case MD_SPAN_U:
-            append_xml(ctx, "</w:t></w:r>");
+            if (ctx->in_text_run) {
+                append_xml(ctx, "</w:t></w:r>");
+                ctx->in_text_run = 0;
+            }
+            ctx->format_underline = 0;
             ctx->in_span = 0;
             break;
             
@@ -423,14 +552,13 @@ static int text_callback(MD_TEXTTYPE type, const MD_CHAR *text, MD_SIZE size, vo
         case MD_TEXT_NORMAL:
         case MD_TEXT_CODE:
         case MD_TEXT_HTML:
-            // If we're in a span, text is already wrapped properly
-            // Otherwise, we need to create a text run
-            if (!ctx->in_span && !ctx->in_text_run) {
-                append_xml(ctx, "<w:r><w:t>");
-                ctx->in_text_run = 1;
+            // Start text run if needed
+            if (!ctx->in_text_run) {
+                start_text_run(ctx);
                 ctx->para_has_content = 1;
             }
             xml_escape_append(ctx, text, size);
+            ctx->run_has_text = 1;  // Mark that this run has text
             break;
             
         case MD_TEXT_NULLCHAR:

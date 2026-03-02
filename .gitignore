@@ -11,3 +11,4 @@ test/output.*
 test/test.csv
 test/test-from-xlsx.md
 test/test.xlsx
+test/test-special.xlsx

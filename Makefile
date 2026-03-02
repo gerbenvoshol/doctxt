@@ -9,7 +9,13 @@ MD2DOCX_OBJ = ${MD2DOCX_SRC:.c=.o}
 DOCX2MD_SRC = docx2md.c util.c miniz.c
 DOCX2MD_OBJ = ${DOCX2MD_SRC:.c=.o}
 
-all: options doctxt md2docx docx2md
+XLSX2CSV_SRC = xlsx2csv.c util.c miniz.c
+XLSX2CSV_OBJ = ${XLSX2CSV_SRC:.c=.o}
+
+XLSX2MD_SRC = xlsx2md.c util.c miniz.c
+XLSX2MD_OBJ = ${XLSX2MD_SRC:.c=.o}
+
+all: options doctxt md2docx docx2md xlsx2csv xlsx2md
 
 options:
 	@echo doctxt build options:
@@ -35,9 +41,17 @@ docx2md: docx2md.o util.o miniz.o
 	@echo CC -o $@
 	@${CC} -o $@ docx2md.o util.o miniz.o ${LDFLAGS}
 
+xlsx2csv: xlsx2csv.o util.o miniz.o
+	@echo CC -o $@
+	@${CC} -o $@ xlsx2csv.o util.o miniz.o ${LDFLAGS}
+
+xlsx2md: xlsx2md.o util.o miniz.o
+	@echo CC -o $@
+	@${CC} -o $@ xlsx2md.o util.o miniz.o ${LDFLAGS}
+
 clean:
 	@echo cleaning
-	@rm -f doctxt md2docx docx2md ${OBJ} md2docx.o docx2md.o doctxt-${VERSION}.tar.gz
+	@rm -f doctxt md2docx docx2md xlsx2csv xlsx2md ${OBJ} md2docx.o docx2md.o xlsx2csv.o xlsx2md.o doctxt-${VERSION}.tar.gz
 
 dist: clean
 	@echo creating dist tarball
@@ -56,12 +70,18 @@ install: all
 	@chmod 755 ${DESTDIR}${PREFIX}/bin/md2docx
 	@cp -f docx2md ${DESTDIR}${PREFIX}/bin
 	@chmod 755 ${DESTDIR}${PREFIX}/bin/docx2md
+	@cp -f xlsx2csv ${DESTDIR}${PREFIX}/bin
+	@chmod 755 ${DESTDIR}${PREFIX}/bin/xlsx2csv
+	@cp -f xlsx2md ${DESTDIR}${PREFIX}/bin
+	@chmod 755 ${DESTDIR}${PREFIX}/bin/xlsx2md
 
 uninstall:
 	@echo removing executable files from ${DESTDIR}${PREFIX}/bin
 	@rm -f ${DESTDIR}${PREFIX}/bin/doctxt
 	@rm -f ${DESTDIR}${PREFIX}/bin/md2docx
 	@rm -f ${DESTDIR}${PREFIX}/bin/docx2md
+	@rm -f ${DESTDIR}${PREFIX}/bin/xlsx2csv
+	@rm -f ${DESTDIR}${PREFIX}/bin/xlsx2md
 
 
 .PHONY: all options clean install uninstall

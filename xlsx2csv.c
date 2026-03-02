@@ -89,9 +89,10 @@ static void
 excelcolrow(char *string, int *outcol, int *outrow)
 {
 	int i, col;
+	size_t len = strlen(string);
 
 	col = 0;
-	for (i = 0; i < strlen(string); i++) {
+	for (i = 0; i < len; i++) {
 		if (isalpha(string[i])) {
 			col = col * 26 + ((toupper(string[i])) - 'A' + 1);
 		} else

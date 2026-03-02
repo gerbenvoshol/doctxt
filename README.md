@@ -4,13 +4,15 @@ doctxt is a simple, fast bidirectional conversion tool written in C:
 - **doctxt**: Convert docx to txt
 - **md2docx**: Convert markdown to docx
 - **docx2md**: Convert docx to markdown
+- **xlsx2csv**: Convert xlsx (Excel 2007+) to CSV
+- **xlsx2md**: Convert xlsx (Excel 2007+) to Markdown tables
 
 ## Dependencies
 
 ### For building
 
 No external libraries required! This project uses embedded dependencies:
-- **txml** (embedded) - for XML parsing in doctxt and docx2md
+- **txml** (embedded) - for XML parsing in doctxt, docx2md, xlsx2csv, and xlsx2md
 - **miniz** (embedded) - for ZIP handling in all tools
 - **md4c** (embedded) - for Markdown parsing in md2docx
 
@@ -135,3 +137,73 @@ Images embedded in the DOCX file are automatically extracted to the same directo
 - The tool extracts text content and formatting from DOCX files
 - Hyperlinks are converted to plain text (link text without URLs, as URLs may not be stored in simple DOCX files)
 - Images are extracted from the DOCX archive and saved to the output directory
+
+### xlsx2csv - XLSX to CSV Converter
+
+Convert Microsoft Excel 2007+ XLSX files to CSV format.
+
+```sh
+$ xlsx2csv -if input.xlsx [-sh sheet_number] [-of output.csv]
+```
+
+**Options:**
+- `-if FILE`: Input spreadsheet in Excel 2007 format (required)
+- `-sh NUMBER`: Sheet number to convert (default: 1)
+- `-of FILE`: Output CSV file (default: stdout)
+- `-v`: Display version information
+- `-h`: Display help message
+
+**Example:**
+
+```sh
+# Convert first sheet to CSV
+$ xlsx2csv -if data.xlsx -of data.csv
+
+# Convert specific sheet to CSV
+$ xlsx2csv -if data.xlsx -sh 2 -of sheet2.csv
+
+# Output to stdout (can be piped)
+$ xlsx2csv -if data.xlsx | grep "pattern"
+```
+
+**Features:**
+- Fast conversion using embedded txml and miniz libraries
+- Handles shared strings for efficient storage
+- Properly escapes CSV fields containing commas, quotes, or newlines
+- Supports all Excel 2007+ XLSX files
+
+### xlsx2md - XLSX to Markdown Converter
+
+Convert Microsoft Excel 2007+ XLSX files to Markdown tables.
+
+```sh
+$ xlsx2md -if input.xlsx [-sh sheet_number] [-of output.md]
+```
+
+**Options:**
+- `-if FILE`: Input spreadsheet in Excel 2007 format (required)
+- `-sh NUMBER`: Sheet number to convert (default: 1)
+- `-of FILE`: Output Markdown file (default: stdout)
+- `-v`: Display version information
+- `-h`: Display help message
+
+**Example:**
+
+```sh
+# Convert first sheet to Markdown table
+$ xlsx2md -if data.xlsx -of data.md
+
+# Convert specific sheet to Markdown
+$ xlsx2md -if data.xlsx -sh 2 -of sheet2.md
+
+# Output to stdout
+$ xlsx2md -if data.xlsx
+```
+
+**Features:**
+- Creates properly formatted Markdown tables
+- First row is automatically treated as table header
+- Escapes pipe characters in cell content
+- Handles empty cells gracefully
+- Perfect for including Excel data in documentation
+

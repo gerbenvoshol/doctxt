@@ -2,7 +2,13 @@
 doctxt
 md2docx
 docx2md
+xlsx2csv
+xlsx2md
 out.txt
 output.docx
 output.txt
 test/output.*
+test/test.csv
+test/test-from-xlsx.md
+test/test.xlsx
+test/test-special.xlsx
